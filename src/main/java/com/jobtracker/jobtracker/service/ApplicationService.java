@@ -1,3 +1,4 @@
+
 package com.jobtracker.jobtracker.service;
 
 import com.jobtracker.jobtracker.dto.ApplicationRequest;
@@ -5,8 +6,6 @@ import com.jobtracker.jobtracker.dto.ApplicationResponse;
 import com.jobtracker.jobtracker.entity.ApplicationStatus;
 import com.jobtracker.jobtracker.entity.JobApplication;
 import com.jobtracker.jobtracker.entity.User;
-import com.jobtracker.jobtracker.event.StatusUpdateEvent;
-import com.jobtracker.jobtracker.messaging.NotificationProducer;
 import com.jobtracker.jobtracker.repository.JobApplicationRepository;
 import com.jobtracker.jobtracker.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -19,10 +18,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ApplicationService {
 
-    // ALL fields must be together at the top
     private final JobApplicationRepository applicationRepository;
     private final UserRepository userRepository;
-    private final NotificationProducer notificationProducer;
+    private final EmailService emailService;
 
     // Helper: get User from email
     private User getUser(String email) {
@@ -74,18 +72,18 @@ public class ApplicationService {
         return toResponse(app);
     }
 
-    // UPDATE status + publish RabbitMQ event
+    // UPDATE status + send email directly
     public ApplicationResponse updateStatus(Long id, String newStatus, String email) {
         User user = getUser(email);
         JobApplication app = applicationRepository.findByIdAndUser(id, user)
                 .orElseThrow(() -> new RuntimeException("Application not found"));
 
         String oldStatus = app.getStatus().name();
-
         app.setStatus(ApplicationStatus.valueOf(newStatus.toUpperCase()));
         ApplicationResponse response = toResponse(applicationRepository.save(app));
 
-        StatusUpdateEvent event = new StatusUpdateEvent(
+        // Send email directly (async - runs in background)
+        emailService.sendStatusUpdateEmail(
                 user.getEmail(),
                 user.getName(),
                 app.getCompany(),
@@ -93,7 +91,6 @@ public class ApplicationService {
                 oldStatus,
                 newStatus.toUpperCase()
         );
-        notificationProducer.sendStatusUpdateNotification(event);
 
         return response;
     }
